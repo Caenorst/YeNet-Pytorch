@@ -204,12 +204,14 @@ class RandomRot(object):
     def __call__(self, samples):
         images = samples['images']
         rot = random.randint(0,3)
-        return {'images': np.rot90(images, rot, axes=[1,2]), 
+        return {'images': np.rot90(images, rot, axes=[1,2]).copy(), 
                 'labels': samples['labels']}
 
 class RandomFlip(object):
     def __call__(self, samples):
-        images = samples['images']
-        rot = random.randint(0,3)
-        return {'images': np.flip(images, axis=2).copy(),
-                'labels': samples['labels']}
+        if random.random() < 0.5:
+            images = samples['images']
+            return {'images': np.flip(images, axis=2).copy(),
+                    'labels': samples['labels']}
+        else:
+            return samples

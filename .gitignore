@@ -1,2 +1,5 @@
 *.pyc
 checkpoints/*
+.ipynb_checkpoints/
+log_reader.ipynb
+logs

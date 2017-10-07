@@ -2,19 +2,17 @@ from __future__ import print_function
 import argparse
 import os
 import shutil
-import sys
 import time
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
-from torch.utils.data import Dataset, DataLoader
-import torchvision
 from torchvision import transforms
 import utils
 import YeNet
 
-parser = argparse.ArgumentParser(description='PyTorch YeNet')
+
+parser = argparse.ArgumentParser(description='PyTorch implementation of YeNet')
 parser.add_argument('train_cover_dir', type=str, metavar='PATH',
                     help='path of directory containing all ' +
                     'training cover images')
@@ -49,6 +47,9 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 parser.add_argument('--log-interval', type=int, default=200, metavar='N',
                     help='how many batches to wait before logging training status')
+# TODO: use a format to store logs (tensorboard ?)
+# parser.add_argument('--log-path', type=str, default='logs/training.log',
+#                     metavar='PATH', help='path to generated log file')
 args = parser.parse_args()
 arch = 'YeNet_with_bn' if args.use_batch_norm else 'YeNet'
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -86,10 +87,13 @@ valid_loader = utils.DataLoaderStego(args.valid_cover_dir, args.valid_stego_dir,
                                      transform=valid_transform,
                                      num_workers=kwargs['num_workers'],
                                      pin_memory=kwargs['pin_memory'])
-
+print('train_loader have {} iterations, valid_loader have {} iterations'.format(
+    len(train_loader), len(valid_loader)))
+# valid_loader = train_loader
 print("Generate model")
 net = YeNet.YeNet(with_bn=args.use_batch_norm)
 
+print(net)
 print("Generate loss and optimizer")
 if args.cuda:
     net.cuda()
@@ -99,30 +103,33 @@ else:
 optimizer = optim.Adadelta(net.parameters(), lr=args.lr, rho=0.95, eps=1e-8,
                            weight_decay=5e-4)
 _time = time.time()
-
+    
 def train(epoch):
     net.train()
-    running_loss = 0.0
-    running_accuracy = 0.0
+    running_loss = 0.
+    running_accuracy = 0.
     for batch_idx, data in enumerate(train_loader):
         images, labels = Variable(data['images']), Variable(data['labels'])
         if args.cuda:
             images, labels = images.cuda(), labels.cuda()
         optimizer.zero_grad()
         outputs = net(images)
-        running_accuracy += YeNet.accuracy(outputs, labels).data[0]
+        accuracy = YeNet.accuracy(outputs, labels).data[0]
+        running_accuracy += accuracy
         loss = criterion(outputs, labels)
+        running_loss += loss.data[0]
         loss.backward()
         optimizer.step()
-        running_loss += loss.data[0]
         if (batch_idx + 1) % args.log_interval == 0:
-            print(('Train epoch: {} [{}/{}]\tAccuracy: ' +
+            running_accuracy /= args.log_interval
+            running_loss /= args.log_interval
+            print(('\nTrain epoch: {} [{}/{}]\tAccuracy: ' +
                   '{:.2f}%\tLoss: {:.6f}').format(
                   epoch, batch_idx + 1, len(train_loader), 
-                  100 * running_accuracy / args.log_interval, 
-                  running_loss / args.log_interval))
-            running_loss = 0.0
-            running_accuracy = 0.0
+                  100 * running_accuracy, running_loss))
+            running_loss = 0.
+            running_accuracy = 0.
+            net.train()
 
 def valid():
     net.eval()
@@ -130,18 +137,18 @@ def valid():
     valid_accuracy = 0.
     correct = 0
     for data in valid_loader:
+        # break
         images, labels = Variable(data['images']), Variable(data['labels'])
         if args.cuda:
             images, labels = images.cuda(), labels.cuda()
         outputs = net(images)
         valid_loss += criterion(outputs, labels).data[0]
         valid_accuracy += YeNet.accuracy(outputs, labels).data[0]
-        
     valid_loss /= len(valid_loader)
-    valid_accuracy *= 100. / len(valid_loader)
+    valid_accuracy /= len(valid_loader)
     print('\nTest set: Loss: {:.4f}, Accuracy: {:.2f}%)\n'.format(
-        valid_loss, valid_accuracy))
-    return valid_accuracy, valid_loss
+        valid_loss, 100 * valid_accuracy))
+    return valid_loss, valid_accuracy
     
 def save_checkpoint(state, is_best, filename='checkpoints/checkpoint.pth.tar'):
     torch.save(state, filename)
@@ -155,7 +162,7 @@ for epoch in range(1, args.epochs + 1):
     train(epoch)
     print("Time:", time.time() - _time)
     print("Test")
-    accuracy, _ = valid()
+    _, accuracy = valid()
     if accuracy > best_accuracy:
         best_accuracy = accuracy
         is_best = True
